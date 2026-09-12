@@ -4909,6 +4909,18 @@ const ImWchar*   ImFontAtlas::GetGlyphRangesDefault()
     return &ranges[0];
 }
 
+const ImWchar*  ImFontAtlas::GetGlyphRangesThai()
+{
+    static const ImWchar ranges[] =
+    {
+        0x0020, 0x00FF, // Basic Latin
+        0x2010, 0x205E, // Punctuations
+        0x0E00, 0x0E7F, // Thai
+        0,
+    };
+    return &ranges[0];
+}
+
 #ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
 const ImWchar*   ImFontAtlas::GetGlyphRangesGreek()
 {
@@ -5126,18 +5138,6 @@ const ImWchar*  ImFontAtlas::GetGlyphRangesCyrillic()
         0x0400, 0x052F, // Cyrillic + Cyrillic Supplement
         0x2DE0, 0x2DFF, // Cyrillic Extended-A
         0xA640, 0xA69F, // Cyrillic Extended-B
-        0,
-    };
-    return &ranges[0];
-}
-
-const ImWchar*  ImFontAtlas::GetGlyphRangesThai()
-{
-    static const ImWchar ranges[] =
-    {
-        0x0020, 0x00FF, // Basic Latin
-        0x2010, 0x205E, // Punctuations
-        0x0E00, 0x0E7F, // Thai
         0,
     };
     return &ranges[0];
@@ -5554,6 +5554,30 @@ void ImTextInitClassifiers()
     ImTextClassifierSetCharClass(g_CharClassifierIsSeparator_3000_300f, 0x3000, 0x300F, ImWcharClass_Punct, 0x3002);
 }
 
+// Thai Typography & Shaping helpers
+// Returns true if character is a Thai combining mark (upper/lower vowel, tone mark, diacritic)
+// that should never be separated from its preceding base consonant across line breaks.
+static inline bool ImCharIsThaiCombining(unsigned int c)
+{
+    return (c == 0x0E31) || (c >= 0x0E34 && c <= 0x0E3A) || (c >= 0x0E47 && c <= 0x0E4E);
+}
+
+static inline const char* ImSkipThaiCombining(const char* s, const char* s_end)
+{
+    while (s < s_end)
+    {
+        unsigned int c = (unsigned char)*s;
+        if (c < 0x80)
+            break;
+        const char* next_s = s + ImTextCharFromUtf8(&c, s, s_end);
+        if (ImCharIsThaiCombining(c))
+            s = next_s;
+        else
+            break;
+    }
+    return s;
+}
+
 // Simple word-wrapping for English, not full-featured. Please submit failing cases!
 // This will return the next location to wrap from. If no wrapping if necessary, this will fast-forward to e.g. text_end.
 // Refer to imgui_test_suite's "drawlist_text_wordwrap_1" for tests.
@@ -5658,7 +5682,7 @@ const char* ImFontCalcWordWrapPositionEx(ImFont* font, float size, const char* t
             // FIXME: Narrow wrapping e.g. "A quick brown" -> "Quic|k br|own", would require knowing if span is going to be longer than wrap_width.
             //if (span_width > wrap_width && !is_blank && !was_blank)
             //    return s;
-            return span_end;
+            return ImSkipThaiCombining(span_end, text_end);
         }
 
         prev_type = curr_type;
@@ -5668,8 +5692,11 @@ const char* ImFontCalcWordWrapPositionEx(ImFont* font, float size, const char* t
     // Wrap_width is too small to fit anything. Force displaying 1 character to minimize the height discontinuity.
     // +1 may not be a character start point in UTF-8 but it's ok because caller loops use (text >= word_wrap_eol).
     if (s == text && text < text_end)
-        return s + ImTextCountUtf8BytesFromChar(s, text_end);
-    return s;
+    {
+        const char* forced = s + ImTextCountUtf8BytesFromChar(s, text_end);
+        return ImSkipThaiCombining(forced, text_end);
+    }
+    return ImSkipThaiCombining(s, text_end);
 }
 
 const char* ImFont::CalcWordWrapPosition(float size, const char* text, const char* text_end, float wrap_width)
@@ -5894,6 +5921,8 @@ begin:
 
     const ImU32 col_untinted = col | ~IM_COL32_A_MASK;
     const char* word_wrap_eol = NULL;
+    bool prev_was_upper_vowel = false;
+    bool prev_was_tall = false;
 
     while (s < text_end)
     {
@@ -5911,6 +5940,8 @@ begin:
                     break; // break out of main loop
                 word_wrap_eol = NULL;
                 s = ImTextCalcWordWrapNextLineStart(s, text_end, flags); // Wrapping skips upcoming blanks
+                prev_was_upper_vowel = false;
+                prev_was_tall = false;
                 continue;
             }
         }
@@ -5930,6 +5961,8 @@ begin:
                 y += line_height;
                 if (y > clip_rect.w)
                     break; // break out of main loop
+                prev_was_upper_vowel = false;
+                prev_was_tall = false;
                 continue;
             }
             if (c == '\r')
@@ -5940,14 +5973,37 @@ begin:
         //if (glyph == NULL)
         //    continue;
 
+        // Thai Typography Shaping:
+        // Adjust tone mark vertical height above upper vowels, and horizontal offset on tall consonants (ป, ฝ, ฟ, ฬ)
+        float off_x = 0.0f;
+        float off_y = 0.0f;
+        if (c >= 0x0E48 && c <= 0x0E4C) // วรรณยุกต์ (่ ้ ๊ ๋ ์)
+        {
+            if (prev_was_upper_vowel)
+                off_y -= 3.0f * scale; // Lift tone mark above upper vowel (prevent collision)
+            if (prev_was_tall)
+                off_x -= 1.5f * scale; // Shift left away from tall consonant ascender
+        }
+        else if (c == 0x0E31 || (c >= 0x0E34 && c <= 0x0E37) || c == 0x0E47 || c == 0x0E4D) // สระบน (ั, ิ, ี, ึ, ื, ็, ํ)
+        {
+            if (prev_was_tall)
+                off_x -= 1.5f * scale; // Shift left away from tall consonant ascender
+            prev_was_upper_vowel = true;
+        }
+        else
+        {
+            prev_was_upper_vowel = false;
+            prev_was_tall = (c == 0x0E1B || c == 0x0E1D || c == 0x0E1F || c == 0x0E2C); // ป, ฝ, ฟ, ฬ
+        }
+
         float char_width = glyph->AdvanceX * scale;
         if (glyph->Visible)
         {
             // We don't do a second finer clipping test on the Y axis as we've already skipped anything before clip_rect.y and exit once we pass clip_rect.w
-            float x1 = x + glyph->X0 * scale;
-            float x2 = x + glyph->X1 * scale;
-            float y1 = y + glyph->Y0 * scale;
-            float y2 = y + glyph->Y1 * scale;
+            float x1 = x + glyph->X0 * scale + off_x;
+            float x2 = x + glyph->X1 * scale + off_x;
+            float y1 = y + glyph->Y0 * scale + off_y;
+            float y2 = y + glyph->Y1 * scale + off_y;
             if (x1 <= clip_rect.z && x2 >= clip_rect.x)
             {
                 // Render a character

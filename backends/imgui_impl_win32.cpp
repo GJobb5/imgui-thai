@@ -785,6 +785,33 @@ IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandlerEx(HWND hwnd, UINT msg, WPA
         ImGui_ImplWin32_UpdateKeyboardCodePage(io);
         return 0;
     case WM_CHAR:
+        // Thai Keyboard input support (TIS-620 / CP874):
+        // On non-Unicode windows, or when using a Thai keyboard layout (0x041E),
+        // single-byte characters 0xA1-0xFB map directly to Unicode Thai 0x0E01-0x0E5B.
+        if (wParam >= 0xA1 && wParam <= 0xFB)
+        {
+            HKL layout = ::GetKeyboardLayout(0);
+            if (LOWORD(layout) == 0x041E || !::IsWindowUnicode(hwnd))
+            {
+                io.AddInputCharacter((ImWchar)(0x0E00 + (wParam - 0xA0)));
+                return 0;
+            }
+        }
+        if (LOWORD(::GetKeyboardLayout(0)) == 0x041E)
+        {
+            switch (wParam)
+            {
+                case 0x80: io.AddInputCharacter(0x20AC); return 0; // €
+                case 0x85: io.AddInputCharacter(0x2026); return 0; // …
+                case 0x91: io.AddInputCharacter(0x2018); return 0; // ‘
+                case 0x92: io.AddInputCharacter(0x2019); return 0; // ’
+                case 0x93: io.AddInputCharacter(0x201C); return 0; // “
+                case 0x94: io.AddInputCharacter(0x201D); return 0; // ”
+                case 0x96: io.AddInputCharacter(0x2013); return 0; // –
+                case 0x97: io.AddInputCharacter(0x2014); return 0; // —
+                default: break;
+            }
+        }
         if (::IsWindowUnicode(hwnd))
         {
             // You can also use ToAscii()+GetKeyboardState() to retrieve characters.

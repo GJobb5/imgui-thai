@@ -215,8 +215,21 @@ io.Fonts->AddFontFromFileTTF("font.ttf", size_pixels, nullptr, io.Fonts->GetGlyp
 
 // Default + Hiragana, Katakana, Half-Width, Selection of 1946 Ideographs
 io.Fonts->AddFontFromFileTTF("font.ttf", size_pixels, nullptr, io.Fonts->GetGlyphRangesJapanese());
+
+// Basic Latin + Thai characters (0x0E00-0x0E7F)
+io.Fonts->AddFontFromFileTTF("font.ttf", size_pixels, nullptr, io.Fonts->GetGlyphRangesThai());
 ```
 See [Using Custom Glyph Ranges](#using-custom-glyph-ranges) section to create your own ranges.
+
+**Example loading and using a Thai font:**
+```cpp
+ImGuiIO& io = ImGui::GetIO();
+io.Fonts->AddFontFromFileTTF("Prompt-Regular.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesThai());
+```
+```cpp
+ImGui::Text(u8"สวัสดีครับ ยินดีต้อนรับ!");
+ImGui::Text(u8"ทดสอบวรรณยุกต์: ตั้งใจ, ปิ๊ง, ที่นี่");
+```
 
 **Example loading and using a Japanese font:**
 
